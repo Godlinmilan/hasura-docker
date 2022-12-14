@@ -154,12 +154,12 @@ services:
     - "4000:4000"
     - "3000:3000"
     environment:
-      CUBEJS_DB_HOST: ic-db-postgresql-blr1-01307-do-user-12597822-0.b.db.ondigitalocean.com
-      CUBEJS_DB_NAME: timeseries
-      CUBEJS_DB_USER: doadmin
-      CUBEJS_DB_PASS: AVNS_n26lZpl2Hqx6N3kYCiq
-      CUBEJS_DB_TYPE: postgres
-      CUBEJS_DB_PORT: 25060
+      CUBEJS_DB_HOST: *************************
+      CUBEJS_DB_NAME: *************
+      CUBEJS_DB_USER: *****
+      CUBEJS_DB_PASS: ***********
+      CUBEJS_DB_TYPE: **********
+      CUBEJS_DB_PORT: *****
       CUBEJS_DEV_MODE: "true"
       CUBEJS_DB_SSL: "true"
 volumes:
