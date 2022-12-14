@@ -154,22 +154,5 @@ services:
     - "4000:4000"
     - "3000:3000"
     environment:
-<<<<<<< HEAD
-      CUBEJS_DB_HOST: ****************************************
-      CUBEJS_DB_NAME: *********************************
-      CUBEJS_DB_USER: *********************
-      CUBEJS_DB_PASS: **********************************
-      CUBEJS_DB_TYPE: ****************************
-      CUBEJS_DB_PORT: ***************
-=======
-      CUBEJS_DB_HOST: *************************
-      CUBEJS_DB_NAME: *************
-      CUBEJS_DB_USER: *****
-      CUBEJS_DB_PASS: ***********
-      CUBEJS_DB_TYPE: **********
-      CUBEJS_DB_PORT: *****
->>>>>>> 59a215ed1945d26c501957b6aebbf958797718b6
-      CUBEJS_DEV_MODE: "true"
-      CUBEJS_DB_SSL: "true"
 volumes:
   functions_node_modules:
