@@ -1,0 +1,166 @@
+version: '3.6'
+services:
+  traefik:
+    image: "traefik:v2.5"
+    container_name: "traefik"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.address=:80"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=godlin.m@ampcome.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "443:443"
+      - "9090:8080"
+    volumes:
+      - "./letsencrypt:/letsencrypt"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+  whoami:
+    image: "traefik/whoami"
+    container_name: "simple-service"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`icdev.ampcome.com`)"
+      - "traefik.http.routers.whoami.entrypoints=websecure"
+      - "traefik.http.routers.whoami.tls.certresolver=myresolver"
+  graphql-engine:
+    image: hasura/graphql-engine:v2.10.1
+    restart: always
+    expose:
+      - 8080
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: ${POSTGRES_CONNECTION_URL}
+      HASURA_GRAPHQL_JWT_SECRET: ${HASURA_GRAPHQL_JWT_SECRET}
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
+      HASURA_GRAPHQL_UNAUTHORIZED_ROLE: public
+      HASURA_GRAPHQL_LOG_LEVEL: debug
+      HASURA_GRAPHQL_ENABLE_CONSOLE: 'true'
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.hasurassl.rule=Host(`icdev.ampcome.com`) && PathPrefix(`/`)"
+      - "traefik.http.routers.hasurassl.entrypoints=websecure"
+      - "traefik.http.routers.hasura.rule=Host(`icdev.ampcome.com`) && PathPrefix(`/`)"
+      - "traefik.http.routers.hasura.entrypoints=web"
+      - "traefik.http.routers.hasurassl.tls=true"
+  auth:
+    image: nhost/hasura-auth:latest
+    depends_on:
+      - graphql-engine
+    restart: always
+    environment:
+      AUTH_HOST: '0.0.0.0'
+      HASURA_GRAPHQL_DATABASE_URL: ${POSTGRES_CONNECTION_URL_WOSSL}
+      HASURA_GRAPHQL_GRAPHQL_URL: http://graphql-engine:8080/v1/graphql
+      HASURA_GRAPHQL_JWT_SECRET: ${HASURA_GRAPHQL_JWT_SECRET}
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
+      AUTH_CLIENT_URL: ${AUTH_CLIENT_URL:-http://localhost:3000}
+      AUTH_SMTP_HOST: ${AUTH_SMTP_HOST}
+      AUTH_SMTP_PORT: ${AUTH_SMTP_PORT}
+      AUTH_SMTP_USER: ${AUTH_SMTP_USER}
+      AUTH_SMTP_PASS: ${AUTH_SMTP_PASS}
+      AUTH_SMTP_SENDER: ${AUTH_SMTP_SENDER}
+    expose:
+      - 4000
+    healthcheck:
+      disable: true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.strip-auth.stripprefix.prefixes=/v1/auth"
+      - "traefik.http.routers.auth.rule=Host(`icdev.ampcome.com`) && PathPrefix(`/v1/auth`)"
+      - "traefik.http.routers.auth.middlewares=strip-auth@docker"
+      - "traefik.http.routers.auth.entrypoints=websecure"
+      - "traefik.http.routers.auth.tls=true"
+  storage:
+    image: nhost/hasura-storage:0.2.3
+    depends_on:
+      - graphql-engine
+      - minio
+    restart: always
+    expose:
+      - 8000
+    healthcheck:
+      disable: true
+    environment:
+      PUBLIC_URL: http://icdev.ampcome.com/:${PROXY_PORT:-1337}
+      HASURA_METADATA: 1
+      HASURA_ENDPOINT: http://graphql-engine:8080/v1
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
+      S3_ACCESS_KEY: ${STORAGE_ACCESS_KEY}
+      S3_SECRET_KEY: ${STORAGE_SECRET_KEY}
+      S3_ENDPOINT: http://minio:8484
+      S3_BUCKET: nhost
+      POSTGRES_MIGRATIONS: 1
+      POSTGRES_MIGRATIONS_SOURCE: ${POSTGRES_CONNECTION_URL}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.storage.rule=Host(`icdev.ampcome.com`) && PathPrefix(`/v1/storage`)"
+      - "traefik.http.routers.storage.entrypoints=websecure"
+      # Rewrite the path so it matches with the new storage API path introduced in hasura-storage 0.2
+      - "traefik.http.middlewares.strip-suffix.replacepathregex.regex=^/v1/storage/(.*)"
+      - "traefik.http.middlewares.strip-suffix.replacepathregex.replacement=/v1/$$1"
+      - "traefik.http.routers.storage.middlewares=strip-suffix@docker"
+      - "traefix.http.routers.storage.tls=true"
+    command: serve
+  functions:
+    image: nhost/functions:latest
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.strip-functions.stripprefix.prefixes=/v1/functions"
+      - "traefik.http.routers.functions.rule=Host(`icdev.ampcome.com`) && PathPrefix(`/v1/functions`)"
+      - "traefik.http.routers.functions.middlewares=strip-functions@docker"
+      - "traefik.http.routers.functions.entrypoints=websecure"
+      - "traefik.http.routers.functions.tls=true"
+    restart: always
+    expose:
+      - 3000
+    healthcheck:
+      disable: true
+    volumes:
+      - .:/opt/project
+      - functions_node_modules:/opt/project/node_modules
+      - /opt/project/data/
+      - /opt/project/initdb.d/
+  minio:
+    image: minio/minio:RELEASE.2021-09-24T00-24-24Z
+    entrypoint: sh
+    command: -c 'mkdir -p /data/nhost && /opt/bin/minio server --address :8484 /data'
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY}
+    ports:
+      - ${MINIO_PORT:-8484}:8484
+    volumes:
+      - ./data/minio:/data
+  mailhog:
+    image: mailhog/mailhog
+    environment:
+      SMTP_HOST: ${AUTH_SMTP_HOST}
+      SMTP_PORT: ${AUTH_SMTP_PORT}
+      SMTP_PASS: ${AUTH_SMTP_PASS}
+      SMTP_USER: ${AUTH_SMTP_USER}
+      SMTP_SECURE: "${AUTH_SMTP_SECURE:-false}"
+      SMTP_SENDER: ${AUTH_SMTP_SENDER}
+    ports:
+      - ${AUTH_SMTP_PORT:-587}:587
+      - 8025:8025
+    volumes:
+      - ./data/mailhog:/maildir
+  cubejs:
+    image: cubejs/cube:latest
+    ports:
+    - "4000:4000"
+    - "3000:3000"
+    environment:
+      CUBEJS_DB_HOST: ic-db-postgresql-blr1-01307-do-user-12597822-0.b.db.ondigitalocean.com
+      CUBEJS_DB_NAME: timeseries
+      CUBEJS_DB_USER: doadmin
+      CUBEJS_DB_PASS: AVNS_n26lZpl2Hqx6N3kYCiq
+      CUBEJS_DB_TYPE: postgres
+      CUBEJS_DB_PORT: 25060
+      CUBEJS_DEV_MODE: "true"
+      CUBEJS_DB_SSL: "true"
+volumes:
+  functions_node_modules:
